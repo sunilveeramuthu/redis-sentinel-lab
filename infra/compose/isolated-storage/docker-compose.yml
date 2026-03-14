@@ -1,0 +1,120 @@
+version: "3.8"
+
+volumes:
+  redis-master-data:
+  redis-replica1-data:
+  redis-replica2-data:
+
+networks:
+  redis-net:
+
+services:
+  redis-master:
+    image: redis:7.2
+    container_name: redis-master
+    command: >
+      redis-server
+      --save 5 1
+      --appendonly yes
+      --appendfilename appendonly.aof
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-master-data:/data
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  redis-replica1:
+    image: redis:7.2
+    container_name: redis-replica1
+    command: >
+      redis-server
+      --save 5 1
+      --appendonly yes
+      --appendfilename appendonly.aof
+      --replicaof redis-master 6379
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-replica1-data:/data
+    networks:
+      - redis-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  redis-replica2:
+    image: redis:7.2
+    container_name: redis-replica2
+    command: >
+      redis-server
+      --save 5 1
+      --appendonly yes
+      --appendfilename appendonly.aof
+      --replicaof redis-master 6379
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis-replica2-data:/data
+    networks:
+      - redis-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  sentinel1:
+    image: redis:7.2
+    container_name: sentinel1
+    command: redis-sentinel /etc/redis/sentinel.conf
+    ports:
+      - "26379:26379"
+    volumes:
+      - ../../../infra/sentinel.conf:/etc/redis/sentinel.conf:ro
+    networks:
+      - redis-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
+
+  sentinel2:
+    image: redis:7.2
+    container_name: sentinel2
+    command: redis-sentinel /etc/redis/sentinel.conf
+    ports:
+      - "26380:26379"
+    volumes:
+      - ../../../infra/sentinel.conf:/etc/redis/sentinel.conf:ro
+    networks:
+      - redis-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
+
+  sentinel3:
+    image: redis:7.2
+    container_name: sentinel3
+    command: redis-sentinel /etc/redis/sentinel.conf
+    ports:
+      - "26381:26379"
+    volumes:
+      - ../../../infra/sentinel.conf:/etc/redis/sentinel.conf:ro
+    networks:
+      - redis-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
