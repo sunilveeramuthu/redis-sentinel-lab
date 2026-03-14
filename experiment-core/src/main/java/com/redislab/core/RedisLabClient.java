@@ -82,8 +82,6 @@ public class RedisLabClient implements AutoCloseable {
                         String currentMaster = masterInfo.get(0) + ":" + masterInfo.get(1);
                         if (originalMasterAddr == null || !currentMaster.equals(originalMasterAddr)) {
                             log.info("New master promoted: {}", currentMaster);
-                            // Give the new master a moment to finish syncing
-                            Thread.sleep(1000);
                             return currentMaster;
                         }
                     }

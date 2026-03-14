@@ -1,0 +1,11 @@
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'com.redislab.isolated.IsolatedStorageExperiment'
+}
+
+dependencies {
+    implementation project(':experiment-core')
+}

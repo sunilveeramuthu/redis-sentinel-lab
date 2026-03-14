@@ -82,7 +82,7 @@ services:
     ports:
       - "26379:26379"
     volumes:
-      - ../../../infra/sentinel.conf:/etc/redis/sentinel.conf:ro
+      - ../../../infra/sentinel1.conf:/etc/redis/sentinel.conf
     networks:
       - redis-net
     depends_on:
@@ -96,7 +96,7 @@ services:
     ports:
       - "26380:26379"
     volumes:
-      - ../../../infra/sentinel.conf:/etc/redis/sentinel.conf:ro
+      - ../../../infra/sentinel2.conf:/etc/redis/sentinel.conf
     networks:
       - redis-net
     depends_on:
@@ -110,7 +110,7 @@ services:
     ports:
       - "26381:26379"
     volumes:
-      - ../../../infra/sentinel.conf:/etc/redis/sentinel.conf:ro
+      - ../../../infra/sentinel3.conf:/etc/redis/sentinel.conf
     networks:
       - redis-net
     depends_on:
