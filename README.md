@@ -13,7 +13,16 @@ This lab proves, with reproducible, automated evidence, that Redis requires excl
 | Docker | 24.x |
 | Docker Compose | v2 (the `docker compose` plugin) |
 | Java | 21 |
-| Gradle | 8.x (or use the included wrapper `./gradlew`) |
+| Gradle | 8.x (or use the included wrapper `gradlew`) |
+
+---
+
+## Running on Windows
+
+- All commands in this README are written for Windows and work in PowerShell, CMD, or Git Bash
+- Docker Desktop for Windows must be running before starting any experiment
+- The Makefile targets are not available on Windows natively — run the three commands for each experiment manually as shown in the "Running the Experiments" section below
+- If using Git Bash, `./gradlew` also works as an alternative to `gradlew`
 
 ---
 
@@ -26,7 +35,7 @@ This lab proves, with reproducible, automated evidence, that Redis requires excl
 docker compose -f infra/compose/shared-storage/docker-compose.yml up -d
 
 # 2. Wait a few seconds for Sentinels to elect a master, then run the experiment
-./gradlew :experiment-shared-storage:run
+gradlew :experiment-shared-storage:run
 
 # 3. Tear down and clean volumes when done
 docker compose -f infra/compose/shared-storage/docker-compose.yml down -v
@@ -39,7 +48,7 @@ docker compose -f infra/compose/shared-storage/docker-compose.yml down -v
 docker compose -f infra/compose/isolated-storage/docker-compose.yml up -d
 
 # 2. Wait a few seconds, then run
-./gradlew :experiment-isolated-storage:run
+gradlew :experiment-isolated-storage:run
 
 # 3. Tear down and clean volumes when done
 docker compose -f infra/compose/isolated-storage/docker-compose.yml down -v
@@ -115,8 +124,8 @@ Each Redis instance **must** have its own dedicated, exclusive volume. This is w
 
 ```
 redis-sentinel-lab/
-├── build.gradle.kts                    # Root Gradle build (Java 21, common deps)
-├── settings.gradle.kts                 # Module declarations
+├── build.gradle                        # Root Gradle build (Java 21, common deps)
+├── settings.gradle                     # Module declarations
 ├── gradle/libs.versions.toml           # Version catalog (Jedis, SLF4J, Logback)
 ├── infra/
 │   ├── sentinel.conf                   # Shared Sentinel configuration
