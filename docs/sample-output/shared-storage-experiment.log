@@ -1,82 +1,63 @@
 =============================================================
   Redis Sentinel Lab — SHARED STORAGE EXPERIMENT
+  (AOF Manifest Race Condition)
 =============================================================
 
-12:44:39.925 [main] INFO  c.r.shared.SharedStorageExperiment - Checking Sentinel connectivity on [localhost:26379, localhost:26380, localhost:26381]...
-12:44:40.082 [main] INFO  c.r.shared.SharedStorageExperiment - Sentinel cluster is reachable.
-12:44:40.084 [main] INFO  c.r.shared.SharedStorageExperiment - [0/7] Flushing stale data — shared volume persists keys across restarts
-12:44:40.716 [main] INFO  c.r.shared.SharedStorageExperiment - [1/7] Topology  →  master: redis-replica2  |  replicas: redis-replica1, redis-master
-12:44:40.716 [main] INFO  c.r.shared.SharedStorageExperiment - [1/7] Writing 1000 baseline keys — replication live, all nodes receive them
-12:44:41.287 [main] INFO  c.r.shared.SharedStorageExperiment - [2/7] Severing replication — replicas must have no TCP socket to drain buffered writes:
-12:44:41.287 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-replica1  →  REPLICAOF NO ONE
-12:44:41.458 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-master  →  REPLICAOF NO ONE
-12:44:41.617 [main] INFO  c.r.shared.SharedStorageExperiment -       Both replicas now standalone with 1000 keys — blind to any further master writes
-12:44:41.619 [main] INFO  c.r.shared.SharedStorageExperiment - [3/7] Writing 300 unreplicated keys to redis-replica2 — master ACKs each write to the client,
-12:44:41.619 [main] INFO  c.r.shared.SharedStorageExperiment -       but redis-replica1 or redis-master have no replication socket — these writes CANNOT reach them
-12:44:41.774 [main] INFO  c.r.shared.SharedStorageExperiment -       Done — 300 writes ACK'd, visible only in redis-replica2's memory and AOF
-12:44:41.774 [main] INFO  c.r.shared.SharedStorageExperiment - [4/7] SIGKILL  →  redis-replica2  (no flush, no graceful handoff)
-12:44:41.774 [main] INFO  c.r.shared.SharedStorageExperiment -       300 in-memory writes die here — unrecoverable
-12:44:42.133 [main] INFO  c.r.shared.SharedStorageExperiment - [5/7] Waiting for Sentinel to elect a new master (up to 30s)...
-12:44:48.326 [main] INFO  c.r.shared.SharedStorageExperiment -       New master elected: redis-master  —  promoted with 1000 keys, missing the 300 unreplicated writes
-12:44:48.328 [main] INFO  c.r.shared.SharedStorageExperiment - [6/7] Verifying data integrity on redis-master — reading back all 1300 expected keys...
+15:10:08.650 [main] INFO  c.r.shared.SharedStorageExperiment - Checking Sentinel connectivity on [localhost:26379, localhost:26380, localhost:26381]...
+15:10:08.814 [main] INFO  c.r.shared.SharedStorageExperiment - Sentinel cluster is reachable.
+15:10:08.818 [main] INFO  c.r.shared.SharedStorageExperiment - [0/7] Flushing stale data — shared volume persists keys across restarts
+15:10:09.390 [main] INFO  c.r.shared.SharedStorageExperiment - [1/7] Topology  →  master: redis-master  |  replicas: redis-replica1, redis-replica2
+15:10:09.390 [main] INFO  c.r.shared.SharedStorageExperiment - [1/7] Writing 1000 baseline keys — replication live, all nodes receive them
+15:10:09.907 [main] INFO  c.r.shared.SharedStorageExperiment -       Baseline written — all 3 nodes hold an identical 1000 key dataset
+15:10:09.907 [main] INFO  c.r.shared.SharedStorageExperiment - [2/7] Severing replication — each node becomes standalone:
+15:10:09.907 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-replica1 → REPLICAOF NO ONE
+15:10:10.146 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-replica2 → REPLICAOF NO ONE
+15:10:10.594 [main] INFO  c.r.shared.SharedStorageExperiment - [3/7] Writing 100 exclusive keys directly to redis-master only:
+15:10:10.594 [main] INFO  c.r.shared.SharedStorageExperiment -       Replicas have no replication socket — they cannot receive these writes.
+15:10:10.594 [main] INFO  c.r.shared.SharedStorageExperiment -       Only redis-master's epoch will contain them.
+15:10:10.633 [main] INFO  c.r.shared.SharedStorageExperiment -       100 exclusive keys written — 1100 total in redis-master's memory
+15:10:10.636 [main] INFO  c.r.shared.SharedStorageExperiment - [4/7] Triggering BGREWRITEAOF on redis-master first and waiting for completion:
+15:10:10.637 [main] INFO  c.r.shared.SharedStorageExperiment -       This writes redis-master's epoch (with all 1100 keys) to disk.
+15:10:10.637 [main] INFO  c.r.shared.SharedStorageExperiment -       The manifest now correctly references redis-master's epoch.
+15:10:10.695 [main] INFO  c.r.shared.SharedStorageExperiment -       BGREWRITEAOF sent → redis-master  (port 6379)
+15:10:11.009 [main] INFO  c.r.shared.SharedStorageExperiment -       Manifest after master's rewrite:
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       --- /data/appendonlydir/appendonly.aof.manifest ---
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       file appendonly.aof.31.base.rdb seq 31 type b
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       file appendonly.aof.31.incr.aof seq 31 type i
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       ---------------------------------------------------
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment - [5/7] Now triggering BGREWRITEAOF on both replicas simultaneously:
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       Each replica has only 1000 keys (no exclusive keys).
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       On shared storage, their rename() calls target the SAME manifest path.
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       One replica's rename() will overwrite redis-master's manifest entry.
+15:10:11.172 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-master's epoch files remain on disk — but nothing references them anymore.
+15:10:11.183 [Thread-0] WARN  c.r.shared.SharedStorageExperiment -       BGREWRITEAOF on redis-replica1 (port 6380) failed: ERR Can't execute an AOF background rewriting. Please check the server logs for more information.
+15:10:11.186 [Thread-1] INFO  c.r.shared.SharedStorageExperiment -       BGREWRITEAOF sent → redis-replica2  (port 6381)
+15:10:11.504 [main] INFO  c.r.shared.SharedStorageExperiment -       Manifest after replicas' rewrite (master's epoch is now orphaned):
+15:10:11.708 [main] INFO  c.r.shared.SharedStorageExperiment -       --- /data/appendonlydir/appendonly.aof.manifest ---
+15:10:11.708 [main] INFO  c.r.shared.SharedStorageExperiment -       file appendonly.aof.32.base.rdb seq 32 type b
+15:10:11.709 [main] INFO  c.r.shared.SharedStorageExperiment -       file appendonly.aof.32.incr.aof seq 32 type i
+15:10:11.709 [main] INFO  c.r.shared.SharedStorageExperiment -       ---------------------------------------------------
+15:10:11.709 [main] INFO  c.r.shared.SharedStorageExperiment - [6/7] Stopping all Redis nodes — shared volume state frozen on disk:
+15:10:11.709 [main] INFO  c.r.shared.SharedStorageExperiment -       docker stop redis-master
+15:10:12.196 [main] INFO  c.r.shared.SharedStorageExperiment -       docker stop redis-replica1
+15:10:12.591 [main] INFO  c.r.shared.SharedStorageExperiment -       docker stop redis-replica2
+15:10:15.039 [main] INFO  c.r.shared.SharedStorageExperiment - [7/7] Restarting all nodes — each reads the SAME manifest from /data:
+15:10:15.039 [main] INFO  c.r.shared.SharedStorageExperiment -       The manifest references a replica's epoch.
+15:10:15.039 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-master's exclusive keys exist in its epoch files on disk,
+15:10:15.039 [main] INFO  c.r.shared.SharedStorageExperiment -       but the manifest no longer lists them. They are permanently orphaned.
+15:10:15.039 [main] INFO  c.r.shared.SharedStorageExperiment -       docker start redis-master
+15:10:15.341 [main] INFO  c.r.shared.SharedStorageExperiment -       docker start redis-replica1
+15:10:15.676 [main] INFO  c.r.shared.SharedStorageExperiment -       docker start redis-replica2
+15:10:19.982 [main] INFO  c.r.shared.SharedStorageExperiment -       Sentinel elected: redis-master  — reading back redis-master's exclusive keys...
 
 ╔══════════════════════════════════════════════════════════════╗
-║                  CORRUPTION REPORT                          ║
+║         AOF MANIFEST RACE CONDITION REPORT                  ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Total keys written    : 1300                                ║
-║  Missing keys          : 300                                 ║
-║  Keys with wrong value : 0                                   ║
+║  Loaded by: redis-master  (Sentinel master after restart)    ║
 ╠══════════════════════════════════════════════════════════════╣
-║  AOF check result      : exit=0 | Start checking Multi Par...║
+║  Node                 Written    Survived   Orphaned  Fate  ║
 ╠══════════════════════════════════════════════════════════════╣
-║  VERDICT: *** DATA CORRUPTION DETECTED ***                   ║
+║  redis-master          100        0          100        LOST  ║
+╠══════════════════════════════════════════════════════════════╣
+║  VERDICT: *** 100 master keys orphaned by manifest overwrite ***║
 ╚══════════════════════════════════════════════════════════════╝
-
-Missing keys (first 20):
-  - unreplicated:0
-  - unreplicated:1
-  - unreplicated:2
-  - unreplicated:3
-  - unreplicated:4
-  - unreplicated:5
-  - unreplicated:6
-  - unreplicated:7
-  - unreplicated:8
-  - unreplicated:9
-  - unreplicated:10
-  - unreplicated:11
-  - unreplicated:12
-  - unreplicated:13
-  - unreplicated:14
-  - unreplicated:15
-  - unreplicated:16
-  - unreplicated:17
-  - unreplicated:18
-  - unreplicated:19
-  ... and 280 more
-
-AOF check detail:
-  exit=0 | Start checking Multi Part AOF
-Start to check BASE AOF (RDB format).
-[offset 0] Checking RDB file /data/appendonlydir/appendonly.aof.14.base.rdb
-[offset 27] AUX FIELD redis-ver = '7.2.13'
-[offset 41] AUX FIELD redis-bits = '64'
-[offset 53] AUX FIELD ctime = '1773592458'
-[offset 68] AUX FIELD used-mem = '1360072'
-[offset 80] AUX FIELD aof-base = '1'
-[offset 82] Selecting DB ID 0
-[offset 22875] Checksum OK
-[offset 22875] \o/ RDB looks OK! \o/
-[info] 1000 keys read
-[info] 0 expires
-[info] 0 already expired
-RDB preamble is OK, proceeding with AOF tail...
-AOF analyzed: filename=appendonly.aof.14.base.rdb, size=22875, ok_up_to=22875, ok_up_to_line=1, diff=0
-BASE AOF appendonly.aof.14.base.rdb is valid
-Start to check INCR files.
-AOF analyzed: filename=appendonly.aof.14.incr.aof, size=45811, ok_up_to=45811, ok_up_to_line=7009, diff=0
-INCR AOF appendonly.aof.14.incr.aof is valid
-All AOF files and manifest are valid
-
-12:44:49.152 [main] INFO  c.r.shared.SharedStorageExperiment - [7/7] Restarting redis-replica2 — it will reload the shared-volume AOF (1300 keys on disk),
-12:44:49.152 [main] INFO  c.r.shared.SharedStorageExperiment -       then Sentinel forces it to sync from redis-master — permanently discarding the 300 writes

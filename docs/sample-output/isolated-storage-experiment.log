@@ -1,0 +1,64 @@
+=============================================================
+  Redis Sentinel Lab — ISOLATED STORAGE EXPERIMENT
+  (AOF Manifest Race Condition — control group)
+=============================================================
+
+15:12:04.404 [main] INFO  c.r.i.IsolatedStorageExperiment - Checking Sentinel connectivity on [localhost:26379, localhost:26380, localhost:26381]...
+15:12:04.562 [main] INFO  c.r.i.IsolatedStorageExperiment - Sentinel cluster is reachable.
+15:12:04.566 [main] INFO  c.r.i.IsolatedStorageExperiment - [0/7] Flushing stale data — each node's volume is independent but may hold prior data
+15:12:05.099 [main] INFO  c.r.i.IsolatedStorageExperiment - [1/7] Topology  →  master: redis-master  |  replicas: redis-replica1, redis-replica2
+15:12:05.099 [main] INFO  c.r.i.IsolatedStorageExperiment - [1/7] Writing 1000 baseline keys — replication live, all nodes receive them
+15:12:05.663 [main] INFO  c.r.i.IsolatedStorageExperiment -       Baseline written — all 3 nodes hold an identical 1000 key dataset
+15:12:05.663 [main] INFO  c.r.i.IsolatedStorageExperiment - [2/7] Severing replication — each node becomes standalone:
+15:12:05.663 [main] INFO  c.r.i.IsolatedStorageExperiment -       redis-replica1 → REPLICAOF NO ONE
+15:12:05.843 [main] INFO  c.r.i.IsolatedStorageExperiment -       redis-replica2 → REPLICAOF NO ONE
+15:12:06.340 [main] INFO  c.r.i.IsolatedStorageExperiment - [3/7] Writing 100 exclusive keys directly to redis-master only:
+15:12:06.340 [main] INFO  c.r.i.IsolatedStorageExperiment -       Replicas have no replication socket — they cannot receive these writes.
+15:12:06.340 [main] INFO  c.r.i.IsolatedStorageExperiment -       Only redis-master's epoch will contain them.
+15:12:06.413 [main] INFO  c.r.i.IsolatedStorageExperiment -       100 exclusive keys written — 1100 total in redis-master's memory
+15:12:06.414 [main] INFO  c.r.i.IsolatedStorageExperiment - [4/7] Triggering BGREWRITEAOF on redis-master first and waiting for completion:
+15:12:06.415 [main] INFO  c.r.i.IsolatedStorageExperiment -       This writes redis-master's epoch (with all 1100 keys) to its private volume.
+15:12:06.424 [main] INFO  c.r.i.IsolatedStorageExperiment -       BGREWRITEAOF sent → redis-master  (port 6379)
+15:12:06.730 [main] INFO  c.r.i.IsolatedStorageExperiment -       redis-master's manifest after rewrite:
+15:12:06.892 [main] INFO  c.r.i.IsolatedStorageExperiment -       [redis-master] appendonly.aof.manifest
+15:12:06.892 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.3.base.rdb seq 3 type b
+15:12:06.892 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.3.incr.aof seq 3 type i
+15:12:06.892 [main] INFO  c.r.i.IsolatedStorageExperiment - [5/7] Now triggering BGREWRITEAOF on both replicas simultaneously:
+15:12:06.892 [main] INFO  c.r.i.IsolatedStorageExperiment -       With isolated storage, each rename() targets its OWN private /data.
+15:12:06.892 [main] INFO  c.r.i.IsolatedStorageExperiment -       redis-master's manifest is on a completely separate volume — unreachable.
+15:12:06.892 [main] INFO  c.r.i.IsolatedStorageExperiment -       No overwrite is possible.
+15:12:06.903 [Thread-0] INFO  c.r.i.IsolatedStorageExperiment -       BGREWRITEAOF sent → redis-replica1  (port 6380)
+15:12:06.903 [Thread-1] INFO  c.r.i.IsolatedStorageExperiment -       BGREWRITEAOF sent → redis-replica2  (port 6381)
+15:12:07.218 [main] INFO  c.r.i.IsolatedStorageExperiment -       All rewrites done — each node has its own independent manifest:
+15:12:07.394 [main] INFO  c.r.i.IsolatedStorageExperiment -       [redis-replica1] appendonly.aof.manifest
+15:12:07.394 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.6.base.rdb seq 6 type b
+15:12:07.394 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.6.incr.aof seq 6 type i
+15:12:07.551 [main] INFO  c.r.i.IsolatedStorageExperiment -       [redis-replica2] appendonly.aof.manifest
+15:12:07.551 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.6.base.rdb seq 6 type b
+15:12:07.551 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.6.incr.aof seq 6 type i
+15:12:07.551 [main] INFO  c.r.i.IsolatedStorageExperiment -       redis-master's manifest is unchanged:
+15:12:07.716 [main] INFO  c.r.i.IsolatedStorageExperiment -       [redis-master] appendonly.aof.manifest
+15:12:07.716 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.3.base.rdb seq 3 type b
+15:12:07.716 [main] INFO  c.r.i.IsolatedStorageExperiment -         file appendonly.aof.3.incr.aof seq 3 type i
+15:12:07.716 [main] INFO  c.r.i.IsolatedStorageExperiment - [6/7] Stopping all Redis nodes:
+15:12:07.716 [main] INFO  c.r.i.IsolatedStorageExperiment -       docker stop redis-master
+15:12:08.189 [main] INFO  c.r.i.IsolatedStorageExperiment -       docker stop redis-replica1
+15:12:08.628 [main] INFO  c.r.i.IsolatedStorageExperiment -       docker stop redis-replica2
+15:12:11.053 [main] INFO  c.r.i.IsolatedStorageExperiment - [7/7] Restarting all nodes — each reads its OWN manifest from its private volume:
+15:12:11.053 [main] INFO  c.r.i.IsolatedStorageExperiment -       redis-master's epoch files are intact. Its exclusive keys are safe.
+15:12:11.053 [main] INFO  c.r.i.IsolatedStorageExperiment -       docker start redis-master
+15:12:11.342 [main] INFO  c.r.i.IsolatedStorageExperiment -       docker start redis-replica1
+15:12:11.659 [main] INFO  c.r.i.IsolatedStorageExperiment -       docker start redis-replica2
+15:12:16.037 [main] INFO  c.r.i.IsolatedStorageExperiment -       Sentinel elected: redis-master  — reading back redis-master's exclusive keys...
+
+╔══════════════════════════════════════════════════════════════╗
+║         AOF MANIFEST RACE CONDITION REPORT                  ║
+╠══════════════════════════════════════════════════════════════╣
+║  Loaded by: redis-master  (Sentinel master after restart)   ║
+╠══════════════════════════════════════════════════════════════╣
+║  Node                 Written    Survived   Orphaned  Fate  ║
+╠══════════════════════════════════════════════════════════════╣
+║  redis-master          100        100        0          OK   ║
+╠══════════════════════════════════════════════════════════════╣
+║  VERDICT: Data integrity OK — no manifest race detected      ║
+╚══════════════════════════════════════════════════════════════╝

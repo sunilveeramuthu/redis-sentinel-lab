@@ -78,8 +78,9 @@ docker compose -f infra/compose/isolated-storage/docker-compose.yml down -v
 
 ## What to Expect
 
-> **Can't run this locally?** A full pre-run log is captured in
-> [`docs/sample-output/shared-storage-experiment.log`](docs/sample-output/shared-storage-experiment.log).
+> **Can't run this locally?** Pre-run logs are captured in
+> [`docs/sample-output/shared-storage-experiment.log`](docs/sample-output/shared-storage-experiment.log) and
+> [`docs/sample-output/isolated-storage-experiment.log`](docs/sample-output/isolated-storage-experiment.log).
 
 ### Shared Storage — Manifest Race Report
 
