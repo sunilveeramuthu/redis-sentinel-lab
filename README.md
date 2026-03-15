@@ -61,24 +61,31 @@ docker compose -f infra/compose/isolated-storage/docker-compose.yml down -v
 
 ## What to Expect
 
+> **Can't run this locally?** A full pre-run log is captured in
+> [`docs/sample-output/shared-storage-experiment.log`](docs/sample-output/shared-storage-experiment.log).
+
 ### Shared Storage — Corruption Report
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║                  CORRUPTION REPORT                           ║
+║                  CORRUPTION REPORT                          ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Total keys written    : 1000                                ║
-║  Missing keys          : 312                                 ║
-║  Keys with wrong value : 47                                  ║
+║  Total keys written    : 1300                                ║
+║  Missing keys          : 300                                 ║
+║  Keys with wrong value : 0                                   ║
 ╠══════════════════════════════════════════════════════════════╣
-║  AOF check result      : exit=1 | AOF is not valid ...       ║
+║  AOF check result      : exit=0 | Start checking Multi Par...║
 ╠══════════════════════════════════════════════════════════════╣
 ║  VERDICT: *** DATA CORRUPTION DETECTED ***                   ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
-The exact numbers vary per run; the point is that corruption is consistently
-present and reproducible.
+1000 baseline keys are written with replication live, then replication is
+severed and 300 more keys are written to the master only. After an ungraceful
+SIGKILL the promoted replica is missing all 300 — they were ACK'd to the
+client but never reached any replica. The AOF is structurally valid (exit=0)
+because Redis 7.x epoch-based AOF prevents file-level corruption; the data
+loss is purely a replication gap, not a disk corruption.
 
 ### Isolated Storage — Clean Report
 

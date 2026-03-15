@@ -1,0 +1,82 @@
+=============================================================
+  Redis Sentinel Lab — SHARED STORAGE EXPERIMENT
+=============================================================
+
+12:44:39.925 [main] INFO  c.r.shared.SharedStorageExperiment - Checking Sentinel connectivity on [localhost:26379, localhost:26380, localhost:26381]...
+12:44:40.082 [main] INFO  c.r.shared.SharedStorageExperiment - Sentinel cluster is reachable.
+12:44:40.084 [main] INFO  c.r.shared.SharedStorageExperiment - [0/7] Flushing stale data — shared volume persists keys across restarts
+12:44:40.716 [main] INFO  c.r.shared.SharedStorageExperiment - [1/7] Topology  →  master: redis-replica2  |  replicas: redis-replica1, redis-master
+12:44:40.716 [main] INFO  c.r.shared.SharedStorageExperiment - [1/7] Writing 1000 baseline keys — replication live, all nodes receive them
+12:44:41.287 [main] INFO  c.r.shared.SharedStorageExperiment - [2/7] Severing replication — replicas must have no TCP socket to drain buffered writes:
+12:44:41.287 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-replica1  →  REPLICAOF NO ONE
+12:44:41.458 [main] INFO  c.r.shared.SharedStorageExperiment -       redis-master  →  REPLICAOF NO ONE
+12:44:41.617 [main] INFO  c.r.shared.SharedStorageExperiment -       Both replicas now standalone with 1000 keys — blind to any further master writes
+12:44:41.619 [main] INFO  c.r.shared.SharedStorageExperiment - [3/7] Writing 300 unreplicated keys to redis-replica2 — master ACKs each write to the client,
+12:44:41.619 [main] INFO  c.r.shared.SharedStorageExperiment -       but redis-replica1 or redis-master have no replication socket — these writes CANNOT reach them
+12:44:41.774 [main] INFO  c.r.shared.SharedStorageExperiment -       Done — 300 writes ACK'd, visible only in redis-replica2's memory and AOF
+12:44:41.774 [main] INFO  c.r.shared.SharedStorageExperiment - [4/7] SIGKILL  →  redis-replica2  (no flush, no graceful handoff)
+12:44:41.774 [main] INFO  c.r.shared.SharedStorageExperiment -       300 in-memory writes die here — unrecoverable
+12:44:42.133 [main] INFO  c.r.shared.SharedStorageExperiment - [5/7] Waiting for Sentinel to elect a new master (up to 30s)...
+12:44:48.326 [main] INFO  c.r.shared.SharedStorageExperiment -       New master elected: redis-master  —  promoted with 1000 keys, missing the 300 unreplicated writes
+12:44:48.328 [main] INFO  c.r.shared.SharedStorageExperiment - [6/7] Verifying data integrity on redis-master — reading back all 1300 expected keys...
+
+╔══════════════════════════════════════════════════════════════╗
+║                  CORRUPTION REPORT                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  Total keys written    : 1300                                ║
+║  Missing keys          : 300                                 ║
+║  Keys with wrong value : 0                                   ║
+╠══════════════════════════════════════════════════════════════╣
+║  AOF check result      : exit=0 | Start checking Multi Par...║
+╠══════════════════════════════════════════════════════════════╣
+║  VERDICT: *** DATA CORRUPTION DETECTED ***                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+Missing keys (first 20):
+  - unreplicated:0
+  - unreplicated:1
+  - unreplicated:2
+  - unreplicated:3
+  - unreplicated:4
+  - unreplicated:5
+  - unreplicated:6
+  - unreplicated:7
+  - unreplicated:8
+  - unreplicated:9
+  - unreplicated:10
+  - unreplicated:11
+  - unreplicated:12
+  - unreplicated:13
+  - unreplicated:14
+  - unreplicated:15
+  - unreplicated:16
+  - unreplicated:17
+  - unreplicated:18
+  - unreplicated:19
+  ... and 280 more
+
+AOF check detail:
+  exit=0 | Start checking Multi Part AOF
+Start to check BASE AOF (RDB format).
+[offset 0] Checking RDB file /data/appendonlydir/appendonly.aof.14.base.rdb
+[offset 27] AUX FIELD redis-ver = '7.2.13'
+[offset 41] AUX FIELD redis-bits = '64'
+[offset 53] AUX FIELD ctime = '1773592458'
+[offset 68] AUX FIELD used-mem = '1360072'
+[offset 80] AUX FIELD aof-base = '1'
+[offset 82] Selecting DB ID 0
+[offset 22875] Checksum OK
+[offset 22875] \o/ RDB looks OK! \o/
+[info] 1000 keys read
+[info] 0 expires
+[info] 0 already expired
+RDB preamble is OK, proceeding with AOF tail...
+AOF analyzed: filename=appendonly.aof.14.base.rdb, size=22875, ok_up_to=22875, ok_up_to_line=1, diff=0
+BASE AOF appendonly.aof.14.base.rdb is valid
+Start to check INCR files.
+AOF analyzed: filename=appendonly.aof.14.incr.aof, size=45811, ok_up_to=45811, ok_up_to_line=7009, diff=0
+INCR AOF appendonly.aof.14.incr.aof is valid
+All AOF files and manifest are valid
+
+12:44:49.152 [main] INFO  c.r.shared.SharedStorageExperiment - [7/7] Restarting redis-replica2 — it will reload the shared-volume AOF (1300 keys on disk),
+12:44:49.152 [main] INFO  c.r.shared.SharedStorageExperiment -       then Sentinel forces it to sync from redis-master — permanently discarding the 300 writes
