@@ -24,6 +24,21 @@ This lab proves, with reproducible, automated evidence, that Redis requires excl
 - The Makefile targets are not available on Windows natively — run the three commands for each experiment manually as shown in the "Running the Experiments" section below
 - If using Git Bash, `./gradlew` also works as an alternative to `gradlew`
 
+### Machine-specific IP configuration
+
+The sentinel configs and Docker Compose files contain a hardcoded LAN IP (`192.168.68.105`).
+This is a known limitation: on Windows with Docker Desktop there is no single address that
+resolves correctly from both inside a container and from the Windows host without manual
+configuration. `host.docker.internal` resolves to different addresses on each side, and
+Docker internal IPs (`172.x.x.x`) are unreachable from the Windows host entirely.
+
+**To run on a different machine**, replace `192.168.68.105` with your machine's LAN IP in:
+- `infra/sentinel1.conf`, `infra/sentinel2.conf`, `infra/sentinel3.conf`
+- `infra/compose/shared-storage/docker-compose.yml`
+
+Your LAN IP is the IPv4 address shown in `ipconfig` under your active network adapter
+(typically Wi-Fi or Ethernet), **not** `127.0.0.1` and not the Docker virtual adapter.
+
 ---
 
 ## Running the Experiments
