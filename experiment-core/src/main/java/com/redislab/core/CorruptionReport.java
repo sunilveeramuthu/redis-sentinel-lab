@@ -47,7 +47,7 @@ public class CorruptionReport {
             Map<String, String> expectedDataset,
             String dataContainerName) {
 
-        log.info("Building corruption report — reading back {} keys...", expectedDataset.size());
+        log.debug("Building corruption report — reading back {} keys...", expectedDataset.size());
 
         List<String> missingKeys = new ArrayList<>();
         Map<String, String[]> wrongValueKeys = new java.util.LinkedHashMap<>();
@@ -64,8 +64,9 @@ public class CorruptionReport {
         }
 
         String aofCheckResult = runAofCheck(dataContainerName);
-        boolean corrupted = !missingKeys.isEmpty() || !wrongValueKeys.isEmpty()
-                || (aofCheckResult != null && aofCheckResult.contains("error"));
+        boolean aofCorrupted = aofCheckResult != null
+                && (aofCheckResult.contains("error") || aofCheckResult.startsWith("exit=1"));
+        boolean corrupted = !missingKeys.isEmpty() || !wrongValueKeys.isEmpty() || aofCorrupted;
 
         return new CorruptionReport(
                 expectedDataset.size(),
@@ -75,20 +76,31 @@ public class CorruptionReport {
                 corrupted);
     }
 
+    private static final String DOCKER = locateDocker();
+
+    private static String locateDocker() {
+        for (String c : java.util.List.of(
+                "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+                "/usr/bin/docker", "/usr/local/bin/docker")) {
+            if (new java.io.File(c).canExecute()) return c;
+        }
+        return "docker";
+    }
+
     private static String runAofCheck(String containerName) {
         if (containerName == null || containerName.isBlank()) {
             return "AOF check skipped — no container name provided";
         }
         try {
-            log.info("Running redis-check-aof inside container '{}'...", containerName);
+            log.debug("Running redis-check-aof inside container '{}'...", containerName);
             ProcessBuilder pb = new ProcessBuilder(
-                    "docker", "exec", containerName,
-                    "redis-check-aof", "/data/appendonly.aof");
+                    DOCKER, "exec", containerName,
+                    "redis-check-aof", "/data/appendonlydir/appendonly.aof.manifest");
             pb.redirectErrorStream(true);
             Process proc = pb.start();
             String output = new String(proc.getInputStream().readAllBytes());
             int exitCode = proc.waitFor();
-            log.info("redis-check-aof exit code: {}", exitCode);
+            log.debug("redis-check-aof exit code: {}", exitCode);
             return "exit=" + exitCode + " | " + output.trim();
         } catch (IOException | InterruptedException e) {
             Thread.currentThread().interrupt();

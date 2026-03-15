@@ -15,6 +15,8 @@ services:
       --save 5 1
       --appendonly yes
       --appendfilename appendonly.aof
+      --replica-announce-ip 192.168.68.105
+      --replica-announce-port 6379
     ports:
       - "6379:6379"
     volumes:
@@ -36,6 +38,8 @@ services:
       --appendonly yes
       --appendfilename appendonly.aof
       --replicaof redis-master 6379
+      --replica-announce-ip 192.168.68.105
+      --replica-announce-port 6380
     ports:
       - "6380:6379"
     volumes:
@@ -60,6 +64,8 @@ services:
       --appendonly yes
       --appendfilename appendonly.aof
       --replicaof redis-master 6379
+      --replica-announce-ip 192.168.68.105
+      --replica-announce-port 6381
     ports:
       - "6381:6379"
     volumes:

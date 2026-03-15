@@ -32,7 +32,7 @@ public class DatasetFixture {
      * @return the expected map of key → value for later diffing
      */
     public static Map<String, String> writeDataset(RedisLabClient client) {
-        log.info("Writing {} keys to Redis...", KEY_COUNT);
+        log.debug("Writing {} keys to Redis...", KEY_COUNT);
         Map<String, String> expected = new LinkedHashMap<>(KEY_COUNT);
         for (int i = 0; i < KEY_COUNT; i++) {
             String k = key(i);
@@ -40,7 +40,7 @@ public class DatasetFixture {
             client.write(k, v);
             expected.put(k, v);
         }
-        log.info("Dataset write complete.");
+        log.debug("Dataset write complete.");
         return expected;
     }
 }

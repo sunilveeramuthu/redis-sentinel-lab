@@ -25,7 +25,13 @@ public class RedisLabClient implements AutoCloseable {
         this.sentinelHosts = sentinelHosts;
         Set<String> sentinels = new HashSet<>(sentinelHosts);
         this.pool = new JedisSentinelPool(MASTER_NAME, sentinels);
-        log.info("JedisSentinelPool created for master '{}' via sentinels {}", MASTER_NAME, sentinels);
+        log.debug("JedisSentinelPool created for master '{}' via sentinels {}", MASTER_NAME, sentinels);
+    }
+
+    public void flushAll() {
+        try (Jedis jedis = pool.getResource()) {
+            jedis.flushAll();
+        }
     }
 
     public void write(String key, String value) {
@@ -68,7 +74,7 @@ public class RedisLabClient implements AutoCloseable {
      * @return the new master address as "host:port"
      */
     public String waitForNewMaster(String originalMasterAddr, int timeoutSeconds) throws InterruptedException {
-        log.info("Waiting up to {}s for new master to be promoted (original: {})", timeoutSeconds, originalMasterAddr);
+        log.debug("Polling sentinels for new master (original: {}, timeout: {}s)", originalMasterAddr, timeoutSeconds);
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
 
         while (System.currentTimeMillis() < deadline) {
@@ -81,7 +87,7 @@ public class RedisLabClient implements AutoCloseable {
                     if (masterInfo != null && masterInfo.size() == 2) {
                         String currentMaster = masterInfo.get(0) + ":" + masterInfo.get(1);
                         if (originalMasterAddr == null || !currentMaster.equals(originalMasterAddr)) {
-                            log.info("New master promoted: {}", currentMaster);
+                            log.debug("Sentinel reports new master: {}", currentMaster);
                             return currentMaster;
                         }
                     }
