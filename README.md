@@ -2,7 +2,9 @@
 
 ## Project Goal
 
-This lab proves, with reproducible, automated evidence, that Redis requires exclusive persistent storage per instance. It orchestrates a three-node Redis Sentinel cluster via Docker Compose, drives a deterministic 1000-key read/write workload through Jedis, triggers a controlled Sentinel failover, and then verifies data integrity against the pre-failover snapshot — producing a concrete corruption report when storage is shared across nodes versus a clean result when each node owns its own isolated volume.
+This lab targets the specific case where **Redis is the source of truth** — no primary database exists to reload from after a failure. In that role, Redis requires exclusive persistent storage per instance.
+
+The lab proves this with a reproducible, automated scenario: it orchestrates a three-node Redis Sentinel cluster via Docker Compose, writes node-specific datasets to each instance, then triggers a concurrent AOF rewrite across all nodes. On shared storage, all three nodes race to overwrite the same manifest file — last rename wins, the other nodes' epoch files are permanently orphaned, and their data is silently discarded. The lab reports exactly which nodes' data survived and which were lost.
 
 ---
 
@@ -79,66 +81,87 @@ docker compose -f infra/compose/isolated-storage/docker-compose.yml down -v
 > **Can't run this locally?** A full pre-run log is captured in
 > [`docs/sample-output/shared-storage-experiment.log`](docs/sample-output/shared-storage-experiment.log).
 
-### Shared Storage — Corruption Report
+### Shared Storage — Manifest Race Report
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║                  CORRUPTION REPORT                          ║
+║         AOF MANIFEST RACE CONDITION REPORT                  ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Total keys written    : 1300                                ║
-║  Missing keys          : 300                                 ║
-║  Keys with wrong value : 0                                   ║
+║  Loaded by: redis-replica1  (Sentinel master after restart)  ║
 ╠══════════════════════════════════════════════════════════════╣
-║  AOF check result      : exit=0 | Start checking Multi Par...║
+║  Node                 Written    Survived   Orphaned  Fate  ║
 ╠══════════════════════════════════════════════════════════════╣
-║  VERDICT: *** DATA CORRUPTION DETECTED ***                   ║
+║  redis-master         100        0          100       LOST  ║
+╠══════════════════════════════════════════════════════════════╣
+║  VERDICT: *** 100 master keys orphaned by manifest overwrite ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
-1000 baseline keys are written with replication live, then replication is
-severed and 300 more keys are written to the master only. After an ungraceful
-SIGKILL the promoted replica is missing all 300 — they were ACK'd to the
-client but never reached any replica. The AOF is structurally valid (exit=0)
-because Redis 7.x epoch-based AOF prevents file-level corruption; the data
-loss is purely a replication gap, not a disk corruption.
+100 exclusive keys are written to the master only, then the master's
+`BGREWRITEAOF` runs and completes — its epoch (including those keys) is
+correctly written to disk. The replicas then run `BGREWRITEAOF` and their
+`rename(temp_manifest → appendonly.aof.manifest)` calls overwrite the master's
+manifest entry on the shared volume. The master's epoch files remain on disk
+but are no longer referenced. On restart, all nodes load a replica's epoch
+and the master's 100 exclusive keys are silently gone.
 
 ### Isolated Storage — Clean Report
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║                  CORRUPTION REPORT                           ║
+║         AOF MANIFEST RACE CONDITION REPORT                  ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Total keys written    : 1000                                ║
-║  Missing keys          : 0                                   ║
-║  Keys with wrong value : 0                                   ║
+║  Loaded by: redis-master  (Sentinel master after restart)   ║
 ╠══════════════════════════════════════════════════════════════╣
-║  AOF check result      : exit=0 | AOF is valid               ║
+║  Node                 Written    Survived   Orphaned  Fate  ║
 ╠══════════════════════════════════════════════════════════════╣
-║  VERDICT: Data integrity OK — no corruption found            ║
+║  redis-master         100        100        0         OK    ║
+╠══════════════════════════════════════════════════════════════╣
+║  VERDICT: Data integrity OK — no manifest race detected      ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
+
+The same rewrite sequence runs but each node's `rename()` targets its own
+private `/data` directory. The master's manifest stays at epoch 2 throughout —
+the replica rewrites (epoch 3) are physically incapable of reaching it.
+On restart the master loads its own epoch and all 100 exclusive keys survive.
 
 ---
 
 ## Why Shared Storage Breaks Redis
 
-Redis uses two complementary persistence mechanisms, and both are designed on the assumption that a single server process owns the storage directory exclusively:
+> **Scope note:** the failure mode below matters specifically when Redis is your **source of truth** — no backing database exists to reload from. If Redis is used purely as a cache (cold-start = cache miss = reload from the primary store), shared storage is less dangerous: you risk a cold start, not permanent data loss. This lab targets the source-of-truth case.
 
-### 1. RDB Snapshot Collision
+Redis 7.x multi-part AOF stores persistence in an epoch-based layout:
 
-When a Redis master performs a `BGSAVE`, it forks a child process that atomically writes a `dump.rdb` file. If multiple Redis instances share the same directory, a replica performing its own `BGSAVE` (triggered by the replication handshake) will overwrite the master's `dump.rdb` in-place, or vice versa. After a failover, the newly promoted master loads whichever `dump.rdb` last won the race — which may represent a stale or partially-written dataset.
+```
+/data/appendonlydir/
+  appendonly.aof.manifest        ← index: which epoch files to load
+  appendonly.aof.1.base.rdb      ← full snapshot at epoch 1
+  appendonly.aof.1.incr.aof      ← incremental writes at epoch 1
+```
 
-### 2. AOF Interleaving
+Both files are designed on the assumption that **a single server process owns `/data` exclusively**.
 
-The Append-Only File (`appendonly.aof`) is a sequential log of every write command. With shared storage, master and replica processes both open the same `appendonly.aof` for writing. Because Redis does not use file locking across processes, their write buffers interleave at the OS level, producing a log with interleaved, out-of-order commands. `redis-check-aof` will report this file as invalid, and any restart or replay will produce garbage data.
+### The Manifest Race Condition
 
-### 3. Stale Reads After Failover
+When `BGREWRITEAOF` runs (triggered automatically on replication promotion, or manually), Redis:
 
-When a replica is promoted to master, Redis normally discards its replication buffer and begins serving its own in-memory state. With shared storage the new master may reload persistence files that were written by the old master after the replica last synced — effectively rolling back to an older dataset, making keys that were written just before the failover invisible.
+1. Forks a child that serialises the full dataset into a new epoch file.
+2. Atomically renames a temp manifest file to `appendonly.aof.manifest` via `rename(2)`.
 
-### The Fix
+With shared storage, all three nodes target the same path. Three concurrent `rename()` calls on the same inode is a standard last-writer-wins race: the last process to call `rename()` overwrites what the others wrote. The surviving manifest references **only one node's epoch files**. All other epochs remain on disk but are orphaned — the manifest no longer lists them, so Redis ignores them on startup.
 
-Each Redis instance **must** have its own dedicated, exclusive volume. This is what `isolated-storage/docker-compose.yml` demonstrates: `redis-master-data`, `redis-replica1-data`, and `redis-replica2-data` are separate volumes. Replication keeps the in-memory datasets in sync; persistence is a private concern of each node. After failover the promoted replica's own clean AOF/RDB is loaded, data integrity is preserved, and the lab reports zero corruption.
+This means:
+
+- All nodes restart and load identical data from the single surviving epoch.
+- The other nodes' exclusive datasets are silently discarded.
+- The orphaned epoch files are not deleted — they accumulate on disk — but Redis cannot use them without manual manifest reconstruction.
+- **There is no error log.** Redis does not warn that its epoch was overwritten. The data loss surfaces only when a query returns nothing.
+
+### Comparison: Isolated Storage
+
+Each Redis instance has its own dedicated volume. Three concurrent `BGREWRITEAOF` calls each write to their own isolated `/data/appendonlydir/`. There is no shared manifest to race over. On restart each node loads its own epoch, all exclusive datasets survive, and the lab reports zero orphaned keys.
 
 ---
 
