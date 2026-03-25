@@ -1,0 +1,94 @@
+private String getJavaOpts() {
+    String rawOpts = resolvePlaceholders(properties.getProperty(JAVA_OPTS));
+    return sanitizeJavaOpts(rawOpts);
+}
+
+private String sanitizeJavaOpts(String javaOpts) {
+    if (javaOpts == null || javaOpts.trim().isEmpty()) {
+        return javaOpts;
+    }
+
+    List<String> tokens = splitCommandLine(javaOpts);
+    List<String> sanitized = new ArrayList<>(tokens.size());
+
+    for (String token : tokens) {
+        sanitized.add(sanitizeJvmOptionToken(token));
+    }
+
+    return String.join(" ", sanitized);
+}
+
+private String sanitizeJvmOptionToken(String token) {
+    if (token == null || token.isEmpty()) {
+        return token;
+    }
+
+    if (!token.startsWith("-D")) {
+        return token;
+    }
+
+    int equalsIndex = token.indexOf('=');
+    if (equalsIndex < 0) {
+        return token;
+    }
+
+    String namePart = token.substring(0, equalsIndex + 1);
+    String valuePart = token.substring(equalsIndex + 1);
+
+    return namePart + normalizeJvmSystemPropertyValue(valuePart);
+}
+
+private String normalizeJvmSystemPropertyValue(String value) {
+    if (value == null) {
+        return "\"\"";
+    }
+
+    String trimmed = value.trim();
+    if (trimmed.isEmpty()) {
+        return "\"\"";
+    }
+
+    if (isWrappedInDoubleQuotes(trimmed)) {
+        return trimmed;
+    }
+
+    String escaped = trimmed
+            .replace("%", "%%")
+            .replace("\"", "\\\"");
+
+    return "\"" + escaped + "\"";
+}
+
+private boolean isWrappedInDoubleQuotes(String value) {
+    return value.length() >= 2
+            && value.startsWith("\"")
+            && value.endsWith("\"");
+}
+
+private List<String> splitCommandLine(String input) {
+    List<String> tokens = new ArrayList<>();
+    StringBuilder current = new StringBuilder();
+    boolean inQuotes = false;
+
+    for (int i = 0; i < input.length(); i++) {
+        char ch = input.charAt(i);
+
+        if (ch == '"') {
+            inQuotes = !inQuotes;
+            current.append(ch);
+        } else if (Character.isWhitespace(ch) && !inQuotes) {
+            if (current.length() > 0) {
+                tokens.add(current.toString());
+                current.setLength(0);
+            }
+        } else {
+            current.append(ch);
+        }
+    }
+
+    if (current.length() > 0) {
+        tokens.add(current.toString());
+    }
+
+    return tokens;
+}
