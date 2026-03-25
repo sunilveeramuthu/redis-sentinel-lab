@@ -1,24 +1,24 @@
 private String getJavaOpts() {
     String rawOpts = resolvePlaceholders(properties.getProperty(JAVA_OPTS));
-    return sanitizeJavaOpts(rawOpts);
+    return escapeForCatalinaBat(rawOpts);
 }
 
-private String sanitizeJavaOpts(String javaOpts) {
-    if (javaOpts == null || javaOpts.trim().isEmpty()) {
+private String escapeForCatalinaBat(String javaOpts) {
+    if (javaOpts == null || javaOpts.isBlank()) {
         return javaOpts;
     }
 
     List<String> tokens = splitCommandLine(javaOpts);
-    List<String> sanitized = new ArrayList<>(tokens.size());
+    List<String> escaped = new ArrayList<>(tokens.size());
 
     for (String token : tokens) {
-        sanitized.add(sanitizeJvmOptionToken(token));
+        escaped.add(escapeJvmOptionTokenForCmd(token));
     }
 
-    return String.join(" ", sanitized);
+    return String.join(" ", escaped);
 }
 
-private String sanitizeJvmOptionToken(String token) {
+private String escapeJvmOptionTokenForCmd(String token) {
     if (token == null || token.isEmpty()) {
         return token;
     }
@@ -35,34 +35,41 @@ private String sanitizeJvmOptionToken(String token) {
     String namePart = token.substring(0, equalsIndex + 1);
     String valuePart = token.substring(equalsIndex + 1);
 
-    return namePart + normalizeJvmSystemPropertyValue(valuePart);
+    return namePart + escapeCmdMetaChars(valuePart);
 }
 
-private String normalizeJvmSystemPropertyValue(String value) {
-    if (value == null) {
-        return "\"\"";
+private String escapeCmdMetaChars(String value) {
+    if (value == null || value.isEmpty()) {
+        return value;
     }
 
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
-        return "\"\"";
+    StringBuilder sb = new StringBuilder(value.length() + 8);
+
+    for (int i = 0; i < value.length(); i++) {
+        char ch = value.charAt(i);
+
+        switch (ch) {
+            case '^':
+                sb.append("^^");
+                break;
+            case '&':
+                sb.append("^&");
+                break;
+            case '|':
+                sb.append("^|");
+                break;
+            case '<':
+                sb.append("^<");
+                break;
+            case '>':
+                sb.append("^>");
+                break;
+            default:
+                sb.append(ch);
+        }
     }
 
-    if (isWrappedInDoubleQuotes(trimmed)) {
-        return trimmed;
-    }
-
-    String escaped = trimmed
-            .replace("%", "%%")
-            .replace("\"", "\\\"");
-
-    return "\"" + escaped + "\"";
-}
-
-private boolean isWrappedInDoubleQuotes(String value) {
-    return value.length() >= 2
-            && value.startsWith("\"")
-            && value.endsWith("\"");
+    return sb.toString();
 }
 
 private List<String> splitCommandLine(String input) {
