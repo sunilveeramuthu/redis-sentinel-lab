@@ -1,101 +1,147 @@
-private String getJavaOpts() {
-    String rawOpts = resolvePlaceholders(properties.getProperty(JAVA_OPTS));
-    return escapeForCatalinaBat(rawOpts);
+#!/usr/bin/env bash
+
+# git-branch-prune.sh — Interactive local branch pruning
+
+# Skips: master, current branch
+
+# Prompts one-by-one for your branches; auto-marks others’ branches as candidates
+
+set -euo pipefail
+
+CURRENT_BRANCH=$(git rev-parse –abbrev-ref HEAD)
+MY_EMAIL=$(git config user.email 2>/dev/null || echo “”)
+MY_NAME=$(git config user.name 2>/dev/null || echo “”)
+
+PROTECTED=(“master” “$CURRENT_BRANCH”)
+
+# Build a map: branch -> worktree path (for branches checked out in a worktree)
+
+declare -A WORKTREE_MAP
+while IFS= read -r line; do
+if [[ “$line” == worktree* ]]; then
+wt_path=”${line#worktree }”
+elif [[ “$line” == branch* ]]; then
+wt_branch=”${line#branch refs/heads/}”
+WORKTREE_MAP[”$wt_branch”]=”$wt_path”
+fi
+done < <(git worktree list –porcelain)
+
+is_protected() {
+local branch=”$1”
+for p in “${PROTECTED[@]}”; do
+[[ “$branch” == “$p” ]] && return 0
+done
+return 1
 }
 
-private String escapeForCatalinaBat(String javaOpts) {
-    if (javaOpts == null || javaOpts.isBlank()) {
-        return javaOpts;
-    }
-
-    List<String> tokens = splitCommandLine(javaOpts);
-    List<String> escaped = new ArrayList<>(tokens.size());
-
-    for (String token : tokens) {
-        escaped.add(escapeJvmOptionTokenForCmd(token));
-    }
-
-    return String.join(" ", escaped);
+is_mine() {
+local branch=”$1”
+local author_email author_name
+author_email=$(git log -1 –format=”%ae” “$branch” 2>/dev/null || echo “”)
+author_name=$(git log -1 –format=”%an” “$branch” 2>/dev/null || echo “”)
+[[ -n “$MY_EMAIL” && “$author_email” == “$MY_EMAIL” ]] && return 0
+[[ -n “$MY_NAME”  && “$author_name”  == “$MY_NAME”  ]] && return 0
+return 1
 }
 
-private String escapeJvmOptionTokenForCmd(String token) {
-    if (token == null || token.isEmpty()) {
-        return token;
-    }
+echo “”
+echo “=== Git Branch Pruner ===”
+echo “Current branch : $CURRENT_BRANCH”
+echo “Identity       : ${MY_NAME} <${MY_EMAIL}>”
+echo “Protected      : master, $CURRENT_BRANCH”
+echo “”
 
-    if (!token.startsWith("-D")) {
-        return token;
-    }
+TO_DELETE=()
+TO_DELETE_WORKTREES=()
 
-    int equalsIndex = token.indexOf('=');
-    if (equalsIndex < 0) {
-        return token;
-    }
+while IFS= read -r branch; do
+branch=”${branch#”${branch%%[![:space:]]*}”}”  # trim leading whitespace
+branch=”${branch/* /}”                         # strip the * marker just in case
 
-    String namePart = token.substring(0, equalsIndex + 1);
-    String valuePart = token.substring(equalsIndex + 1);
+is_protected “$branch” && continue
 
-    return namePart + escapeCmdMetaChars(valuePart);
-}
+merged=””
+if git merge-base –is-ancestor “$branch” master 2>/dev/null; then
+merged=” [merged into master]”
+fi
 
-private String escapeCmdMetaChars(String value) {
-    if (value == null || value.isEmpty()) {
-        return value;
-    }
+author_email=$(git log -1 –format=”%ae” “$branch” 2>/dev/null || echo “?”)
+author_name=$(git log -1 –format=”%an”  “$branch” 2>/dev/null || echo “?”)
+last_date=$(git log -1 –format=”%ar”    “$branch” 2>/dev/null || echo “?”)
 
-    StringBuilder sb = new StringBuilder(value.length() + 8);
+wt_path=”${WORKTREE_MAP[$branch]:-}”
 
-    for (int i = 0; i < value.length(); i++) {
-        char ch = value.charAt(i);
+echo “Branch  : $branch”
+echo “Author  : $author_name <$author_email>${merged}”
+echo “Last    : $last_date”
+[[ -n “$wt_path” ]] && echo “Worktree: $wt_path”
 
-        switch (ch) {
-            case '^':
-                sb.append("^^");
-                break;
-            case '&':
-                sb.append("^&");
-                break;
-            case '|':
-                sb.append("^|");
-                break;
-            case '<':
-                sb.append("^<");
-                break;
-            case '>':
-                sb.append("^>");
-                break;
-            default:
-                sb.append(ch);
-        }
-    }
+if is_mine “$branch”; then
+if [[ -n “$wt_path” ]]; then
+echo “Yours   : YES (checked out in worktree above)”
+printf “  [k]eep both  [d]elete branch+worktree  [s]kip (default: keep) > “
+else
+echo “Yours   : YES — keep, delete, or skip?”
+printf “  [k]eep  [d]elete  [s]kip (default: keep) > “
+fi
+read -r answer </dev/tty
+case “$answer” in
+d|D)
+TO_DELETE+=(”$branch”)
+[[ -n “$wt_path” ]] && TO_DELETE_WORKTREES+=(”$wt_path”)
+echo “  → Marked for deletion.”
+;;
+s|S) echo “  → Skipped.” ;;
+*)   echo “  → Kept.” ;;
+esac
+else
+if [[ -n “$wt_path” ]]; then
+echo “Yours   : NO — marking branch + worktree as deletion candidates.”
+TO_DELETE_WORKTREES+=(”$wt_path”)
+else
+echo “Yours   : NO — marking as deletion candidate.”
+fi
+TO_DELETE+=(”$branch”)
+fi
 
-    return sb.toString();
-}
+echo “”
+done < <(git branch –format=’%(refname:short)’ | grep -v “^${CURRENT_BRANCH}$”)
 
-private List<String> splitCommandLine(String input) {
-    List<String> tokens = new ArrayList<>();
-    StringBuilder current = new StringBuilder();
-    boolean inQuotes = false;
+# Summary
 
-    for (int i = 0; i < input.length(); i++) {
-        char ch = input.charAt(i);
+echo “===============================”
+if [[ ${#TO_DELETE[@]} -eq 0 && ${#TO_DELETE_WORKTREES[@]} -eq 0 ]]; then
+echo “Nothing to delete. You’re clean!”
+exit 0
+fi
 
-        if (ch == '"') {
-            inQuotes = !inQuotes;
-            current.append(ch);
-        } else if (Character.isWhitespace(ch) && !inQuotes) {
-            if (current.length() > 0) {
-                tokens.add(current.toString());
-                current.setLength(0);
-            }
-        } else {
-            current.append(ch);
-        }
-    }
+if [[ ${#TO_DELETE[@]} -gt 0 ]]; then
+echo “Branches marked for deletion (${#TO_DELETE[@]}):”
+for b in “${TO_DELETE[@]}”; do
+echo “  - $b”
+done
+fi
 
-    if (current.length() > 0) {
-        tokens.add(current.toString());
-    }
+if [[ ${#TO_DELETE_WORKTREES[@]} -gt 0 ]]; then
+echo “Worktrees marked for removal (${#TO_DELETE_WORKTREES[@]}):”
+for w in “${TO_DELETE_WORKTREES[@]}”; do
+echo “  - $w”
+done
+fi
 
-    return tokens;
-}
+echo “”
+printf “Confirm deletion of all the above? [y/N] > “
+read -r confirm </dev/tty
+
+if [[ “$confirm” =~ ^[Yy]$ ]]; then
+for w in “${TO_DELETE_WORKTREES[@]}”; do
+git worktree remove –force “$w” && echo “Removed worktree: $w” || echo “Failed worktree:  $w”
+done
+for b in “${TO_DELETE[@]}”; do
+git branch -D “$b” && echo “Deleted branch: $b” || echo “Failed branch:  $b”
+done
+echo “”
+echo “Done.”
+else
+echo “Aborted. No branches or worktrees deleted.”
+fi
