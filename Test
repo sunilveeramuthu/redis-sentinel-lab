@@ -1,117 +1,90 @@
 #!/usr/bin/env bash
-
 # git-branch-prune.sh
-
-# 
-
+#
 # First run only (strips Windows CRLF):
-
-# sed -i ‘s/\r//’ git-branch-prune.sh
-
+# sed -i 's/\r//' git-branch-prune.sh
 # Then run normally each time:
-
 # bash git-branch-prune.sh
-
 set -eo pipefail
-
 # Current branch
-
-CURRENT_BRANCH=$(git branch –show-current)
-
+CURRENT_BRANCH=$(git branch --show-current)
 # Identity
-
 MY_EMAIL=$(git config user.email 2>/dev/null || true)
-MY_NAME=$(git config user.name  2>/dev/null || true)
-
+MY_NAME=$(git config user.name 2>/dev/null || true)
 # Worktree map
-
 declare -A WORKTREE_MAP
 while IFS= read -r line; do
-path=$(echo “$line” | awk ‘{print $1}’)
-branch=$(echo “$line” | awk -F’[][]’ ‘{print $2}’)
-[[ -n “$branch” ]] && WORKTREE_MAP[”$branch”]=”$path”
+path=$(echo "$line" | awk '{print $1}')
+branch=$(echo "$line" | awk -F'[][]' '{print $2}')
+[[ -n "$branch" ]] && WORKTREE_MAP["$branch"]="$path"
 done < <(git worktree list)
-
 is_protected() {
-[[ “$1” == “master” || “$1” == “$CURRENT_BRANCH” ]]
+[[ "$1" == "master" || "$1" == "$CURRENT_BRANCH" ]]
 }
-
 is_mine() {
 local ae an
-ae=$(git log -1 –format=”%ae” “$1” 2>/dev/null || true)
-an=$(git log -1 –format=”%an” “$1” 2>/dev/null || true)
-[[ “$ae” == “$MY_EMAIL” || “$an” == “$MY_NAME” ]]
+ae=$(git log -1 --format="%ae" "$1" 2>/dev/null || true)
+an=$(git log -1 --format="%an" "$1" 2>/dev/null || true)
+[[ "$ae" == "$MY_EMAIL" || "$an" == "$MY_NAME" ]]
 }
-
-echo “”
-echo “=== Git Branch Pruner ===”
-echo “Current : $CURRENT_BRANCH”
-echo “Identity: $MY_NAME <$MY_EMAIL>”
-echo “”
-
+echo ""
+echo "=== Git Branch Pruner ==="
+echo "Current : $CURRENT_BRANCH"
+echo "Identity: $MY_NAME <$MY_EMAIL>"
+echo ""
 TO_DELETE=()
 TO_DELETE_WORKTREES=()
-
 while IFS= read -r branch; do
-is_protected “$branch” && continue
-
-merged=””
-git merge-base –is-ancestor “$branch” master 2>/dev/null && merged=” [merged]”
-
-ae=$(git log -1 –format=”%ae” “$branch” 2>/dev/null || echo “?”)
-an=$(git log -1 –format=”%an” “$branch” 2>/dev/null || echo “?”)
-ar=$(git log -1 –format=”%ar” “$branch” 2>/dev/null || echo “?”)
-wt=”${WORKTREE_MAP[$branch]:-}”
-
-echo “Branch  : $branch”
-echo “Author  : $an <$ae>${merged}”
-echo “Last    : $ar”
-[[ -n “$wt” ]] && echo “Worktree: $wt”
-
-if is_mine “$branch”; then
-[[ -n “$wt” ]] && echo “Yours   : YES (in worktree above)” || echo “Yours   : YES”
-[[ -n “$wt” ]] && printf “  [k]eep  [d]elete branch+worktree  [s]kip (default=keep) > “   
-|| printf “  [k]eep  [d]elete  [s]kip (default=keep) > “
+is_protected "$branch" && continue
+merged=""
+git merge-base --is-ancestor "$branch" master 2>/dev/null && merged=" [merged]"
+ae=$(git log -1 --format="%ae" "$branch" 2>/dev/null || echo "?")
+an=$(git log -1 --format="%an" "$branch" 2>/dev/null || echo "?")
+ar=$(git log -1 --format="%ar" "$branch" 2>/dev/null || echo "?")
+wt="${WORKTREE_MAP[$branch]:-}"
+echo "Branch : $branch"
+echo "Author : $an <$ae>${merged}"
+echo "Last : $ar"
+[[ -n "$wt" ]] && echo "Worktree: $wt"
+if is_mine "$branch"; then
+[[ -n "$wt" ]] && echo "Yours : YES (in worktree above)" || echo "Yours : YES"
+[[ -n "$wt" ]] && printf " [k]eep [d]elete branch+worktree [s]kip (default=keep) > " \
+|| printf " [k]eep [d]elete [s]kip (default=keep) > "
 read -r answer </dev/tty
-case “$answer” in
+case "$answer" in
 d|D)
-TO_DELETE+=(”$branch”)
-[[ -n “$wt” ]] && TO_DELETE_WORKTREES+=(”$wt”)
-echo “  -> Marked for deletion.”
+TO_DELETE+=("$branch")
+[[ -n "$wt" ]] && TO_DELETE_WORKTREES+=("$wt")
+echo " -> Marked for deletion."
 ;;
-s|S) echo “  -> Skipped.” ;;
-*)   echo “  -> Kept.” ;;
+s|S) echo " -> Skipped." ;;
+*) echo " -> Kept." ;;
 esac
 else
-echo “Yours   : NO – queued for deletion.”
-TO_DELETE+=(”$branch”)
-[[ -n “$wt” ]] && TO_DELETE_WORKTREES+=(”$wt”)
+echo "Yours : NO -- queued for deletion."
+TO_DELETE+=("$branch")
+[[ -n "$wt" ]] && TO_DELETE_WORKTREES+=("$wt")
 fi
-echo “”
-
-done < <(git branch –format=’%(refname:short)’)
-
-echo “===============================”
+echo ""
+done < <(git branch --format='%(refname:short)')
+echo "==============================="
 if [[ ${#TO_DELETE[@]} -eq 0 && ${#TO_DELETE_WORKTREES[@]} -eq 0 ]]; then
-echo “Nothing to delete.”
+echo "Nothing to delete."
 exit 0
 fi
-
-[[ ${#TO_DELETE[@]} -gt 0 ]] && echo “Branches to delete:” && printf ’  - %s\n’ “${TO_DELETE[@]}”
-[[ ${#TO_DELETE_WORKTREES[@]} -gt 0 ]] && echo “Worktrees to remove:” && printf ’  - %s\n’ “${TO_DELETE_WORKTREES[@]}”
-
-echo “”
-printf “Confirm? [y/N] > “
+[[ ${#TO_DELETE[@]} -gt 0 ]] && echo "Branches to delete:" && printf ' - %s\n' "${TO_DELETE[
+[[ ${#TO_DELETE_WORKTREES[@]} -gt 0 ]] && echo "Worktrees to remove:" && printf ' - %s\n' "$
+echo ""
+printf "Confirm? [y/N] > "
 read -r confirm </dev/tty
-
-if [[ “$confirm” =~ ^[Yy]$ ]]; then
-for w in “${TO_DELETE_WORKTREES[@]}”; do
-git worktree remove –force “$w” && echo “Removed worktree: $w” || echo “Failed: $w”
+if [[ "$confirm" =~ ^[Yy]$ ]]; then
+for w in "${TO_DELETE_WORKTREES[@]}"; do
+git worktree remove --force "$w" && echo "Removed worktree: $w" || echo "Failed: $w"
 done
-for b in “${TO_DELETE[@]}”; do
-git branch -D “$b” && echo “Deleted: $b” || echo “Failed: $b”
+for b in "${TO_DELETE[@]}"; do
+git branch -D "$b" && echo "Deleted: $b" || echo "Failed: $b"
 done
-echo “Done.”
+echo "Done."
 else
-echo “Aborted.”
+echo "Aborted."
 fi
