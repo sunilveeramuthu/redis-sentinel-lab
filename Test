@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-CURRENT_BRANCH=$(git rev-parse –abbrev-ref HEAD)
+CURRENT_BRANCH=$(git symbolic-ref –short HEAD)
 MY_EMAIL=$(git config user.email 2>/dev/null || echo “”)
 MY_NAME=$(git config user.name 2>/dev/null || echo “”)
 
