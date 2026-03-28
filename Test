@@ -2,64 +2,95 @@
 
 # git-branch-prune.sh — Interactive local branch pruning
 
+# Compatible with bash 3.2+ (Git Bash on Windows ships bash 3.2)
+
 # Skips: master, current branch
 
 # Prompts one-by-one for your branches; auto-marks others’ branches as candidates
 
 set -euo pipefail
 
-# Fix 1: Use git branch –show-current (Git 2.22+) with fallback;
+# ── Current branch ──────────────────────────────────────────────────────────
 
-# avoids –abbrev-ref and symbolic-ref empty-output issues on Git Bash
+# git branch –show-current requires Git 2.22+; fall back to rev-parse if needed
 
-CURRENT_BRANCH=$(git branch –show-current 2>/dev/null)
+CURRENT_BRANCH=$(git branch –show-current 2>/dev/null || true)
 if [[ -z “$CURRENT_BRANCH” ]]; then
-CURRENT_BRANCH=$(git rev-parse –symbolic-full-name HEAD | sed ‘s|refs/heads/||’)
+CURRENT_BRANCH=$(git rev-parse –symbolic-full-name HEAD 2>/dev/null | sed ‘s|refs/heads/||’)
 fi
+if [[ -z “$CURRENT_BRANCH” ]]; then
+echo “ERROR: Could not determine current branch. Are you in a git repo?”
+exit 1
+fi
+
+# ── Identity ─────────────────────────────────────────────────────────────────
 
 MY_EMAIL=$(git config user.email 2>/dev/null || true)
-MY_NAME=$(git config user.name 2>/dev/null || true)
+MY_NAME=$(git config user.name  2>/dev/null || true)
 
-PROTECTED=(“master” “$CURRENT_BRANCH”)
+# ── Temp files ───────────────────────────────────────────────────────────────
 
-# Build worktree map using default format (compatible with Git 2.5+).
+# mktemp is unreliable on Git Bash; use TMPDIR/TEMP/TMP env vars with PID suffix
 
-# Default format: /path/to/worktree   <sha>   [branch] or (detached HEAD)
+_tmpdir=”${TMPDIR:-${TEMP:-${TMP:-/tmp}}}”
 
-# –porcelain was added later and is not available on all Git Bash installs.
+# Strip trailing slash if present
 
-declare -A WORKTREE_MAP
-_wt_tmpfile=$(mktemp)
+_tmpdir=”${_tmpdir%/}”
+_wt_tmpfile=”${_tmpdir}/git-prune-$$-wt.tmp”
+_br_tmpfile=”${_tmpdir}/git-prune-$$-br.tmp”
+trap ‘rm -f “$_wt_tmpfile” “$_br_tmpfile”’ EXIT
+
+# ── Worktree map (bash 3.2: no associative arrays; use parallel indexed arrays)
+
+# git worktree list default format: /path  <sha>  [branch]  or  (detached HEAD)
+
+WORKTREE_BRANCHES=()
+WORKTREE_PATHS=()
+
 git worktree list > “$_wt_tmpfile” 2>/dev/null || true
 while IFS= read -r line; do
-
-# Extract path (first field) and branch (last field, in [brackets])
-
 _wt_path=$(echo “$line” | awk ‘{print $1}’)
-_wt_branch=$(echo “$line” | grep -oP ‘(?<=[)[^]]+(?=])’)
+
+# Extract branch name from [brackets]; sed works on bash 3.2 unlike grep -oP
+
+_wt_branch=$(echo “$line” | sed -n ‘s/.*[([^]]*)].*/\1/p’)
 if [[ -n “$_wt_branch” ]]; then
-WORKTREE_MAP[”$_wt_branch”]=”$_wt_path”
+WORKTREE_BRANCHES+=(”$_wt_branch”)
+WORKTREE_PATHS+=(”$_wt_path”)
 fi
 done < “$_wt_tmpfile”
-rm -f “$_wt_tmpfile”
+
+worktree_path_for() {
+local branch=”$1” i
+for i in “${!WORKTREE_BRANCHES[@]}”; do
+if [[ “${WORKTREE_BRANCHES[$i]}” == “$branch” ]]; then
+echo “${WORKTREE_PATHS[$i]}”
+return
+fi
+done
+echo “”
+}
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 is_protected() {
 local branch=”$1”
-for p in “${PROTECTED[@]}”; do
-[[ “$branch” == “$p” ]] && return 0
-done
+[[ “$branch” == “master”          ]] && return 0
+[[ “$branch” == “$CURRENT_BRANCH” ]] && return 0
 return 1
 }
 
 is_mine() {
-local branch=”$1”
-local author_email author_name
+local branch=”$1” author_email author_name
 author_email=$(git log -1 –format=”%ae” “$branch” 2>/dev/null || true)
-author_name=$(git log -1 –format=”%an”  “$branch” 2>/dev/null || true)
+author_name=$(git log -1  –format=”%an” “$branch” 2>/dev/null || true)
 [[ -n “$MY_EMAIL” && “$author_email” == “$MY_EMAIL” ]] && return 0
 [[ -n “$MY_NAME”  && “$author_name”  == “$MY_NAME”  ]] && return 0
 return 1
 }
+
+# ── Header ───────────────────────────────────────────────────────────────────
 
 echo “”
 echo “=== Git Branch Pruner ===”
@@ -68,15 +99,19 @@ echo “Identity       : ${MY_NAME} <${MY_EMAIL}>”
 echo “Protected      : master, $CURRENT_BRANCH”
 echo “”
 
+# ── Branch loop ──────────────────────────────────────────────────────────────
+
 TO_DELETE=()
 TO_DELETE_WORKTREES=()
 
-_br_tmpfile=$(mktemp)
 git branch –format=’%(refname:short)’ > “$_br_tmpfile”
 
 while IFS= read -r branch; do
-branch=”${branch#”${branch%%[![:space:]]*}”}”  # trim leading whitespace
-branch=”${branch/* /}”                         # strip * marker just in case
+
+# Trim leading whitespace and stray * markers
+
+branch=”${branch#”${branch%%[![:space:]]*}”}”
+branch=”${branch/* /}”
 
 [[ -z “$branch” ]] && continue
 is_protected “$branch” && continue
@@ -87,10 +122,9 @@ merged=” [merged into master]”
 fi
 
 author_email=$(git log -1 –format=”%ae” “$branch” 2>/dev/null || echo “?”)
-author_name=$(git log -1 –format=”%an”  “$branch” 2>/dev/null || echo “?”)
-last_date=$(git log -1 –format=”%ar”    “$branch” 2>/dev/null || echo “?”)
-
-wt_path=”${WORKTREE_MAP[$branch]:-}”
+author_name=$(git log -1  –format=”%an” “$branch” 2>/dev/null || echo “?”)
+last_date=$(git log -1    –format=”%ar” “$branch” 2>/dev/null || echo “?”)
+wt_path=$(worktree_path_for “$branch”)
 
 echo “Branch  : $branch”
 echo “Author  : $author_name <$author_email>${merged}”
@@ -127,9 +161,8 @@ fi
 
 echo “”
 done < “$_br_tmpfile”
-rm -f “$_br_tmpfile”
 
-# Summary
+# ── Summary & confirmation ───────────────────────────────────────────────────
 
 echo “===============================”
 if [[ ${#TO_DELETE[@]} -eq 0 && ${#TO_DELETE_WORKTREES[@]} -eq 0 ]]; then
@@ -156,6 +189,9 @@ printf “Confirm deletion of all the above? [y/N] > “
 read -r confirm </dev/tty
 
 if [[ “$confirm” =~ ^[Yy]$ ]]; then
+
+# Remove worktrees first — git won’t delete a branch checked out in a worktree
+
 for w in “${TO_DELETE_WORKTREES[@]}”; do
 git worktree remove –force “$w” && echo “Removed worktree: $w” || echo “Failed worktree:  $w”
 done
