@@ -4,7 +4,9 @@
 
 # 
 
-# Run with: sed ‘s/\r//’ git-branch-prune.sh | bash
+# Run with:
+
+# sed -i ‘s/\r//’ git-branch-prune.sh && bash git-branch-prune.sh
 
 # 
 
@@ -26,7 +28,7 @@ set -euo pipefail
 
 CURRENT_BRANCH=$(git branch –show-current 2>/dev/null || true)
 if [ -z “$CURRENT_BRANCH” ]; then
-CURRENT_BRANCH=$(git rev-parse –symbolic-full-name HEAD 2>/dev/null | sed ‘s|refs/heads/||’)
+CURRENT_BRANCH=$(git rev-parse –symbolic-full-name HEAD 2>/dev/null | awk -F’refs/heads/’ ‘{print $2}’)
 fi
 if [ -z “$CURRENT_BRANCH” ]; then
 echo “ERROR: Could not determine current branch. Are you inside a git repo?”
@@ -47,13 +49,15 @@ _br_tmp=”.git-prune-$$-br.tmp”
 
 # git worktree list format: /path  <sha>  [branch]  or  (detached HEAD)
 
+# awk -F’[][]’ splits on [ and ] safely without sed backreferences
+
 WORKTREE_BRANCHES=()
 WORKTREE_PATHS=()
 
 git worktree list > “$_wt_tmp” 2>/dev/null || true
 while IFS= read -r line; do
 _wt_path=$(echo “$line” | awk ‘{print $1}’)
-_wt_branch=$(echo “$line” | sed -n ‘s/.*[([^]]*)].*/\1/p’)
+_wt_branch=$(echo “$line” | awk -F’[][]’ ‘{print $2}’)
 if [ -n “$_wt_branch” ]; then
 WORKTREE_BRANCHES+=(”$_wt_branch”)
 WORKTREE_PATHS+=(”$_wt_path”)
@@ -75,8 +79,8 @@ echo “”
 }
 
 is_protected() {
-[ “$1” = “master”           ] && return 0
-[ “$1” = “$CURRENT_BRANCH”  ] && return 0
+[ “$1” = “master”          ] && return 0
+[ “$1” = “$CURRENT_BRANCH” ] && return 0
 return 1
 }
 
@@ -100,16 +104,14 @@ echo “”
 TO_DELETE=()
 TO_DELETE_WORKTREES=()
 
-# git branch –format requires Git 2.7+; fall back to sed if unavailable
-
 if git branch –format=’%(refname:short)’ > “$_br_tmp” 2>/dev/null; then
 true
 else
-git branch | sed ‘s/^[* ]*//’ > “$_br_tmp”
+git branch | awk ‘{gsub(/^[* ]+/,””,$0); print}’ > “$_br_tmp”
 fi
 
 while IFS= read -r branch; do
-branch=$(echo “$branch” | tr -d ‘\r’ | sed ‘s/^[* ]*//’)
+branch=$(echo “$branch” | tr -d ‘\r’ | awk ‘{gsub(/^[* ]+/,””,$0); print}’)
 [ -z “$branch” ] && continue
 is_protected “$branch” && continue
 
