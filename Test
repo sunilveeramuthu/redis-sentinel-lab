@@ -22,19 +22,22 @@ MY_NAME=$(git config user.name 2>/dev/null || true)
 
 PROTECTED=(“master” “$CURRENT_BRANCH”)
 
-# Fix 2: Use temp file instead of process substitution <() to avoid Git Bash
+# Build worktree map using default format (compatible with Git 2.5+).
 
-# misinterpreting email addresses containing @ as shell redirects
+# Default format: /path/to/worktree   <sha>   [branch] or (detached HEAD)
+
+# –porcelain was added later and is not available on all Git Bash installs.
 
 declare -A WORKTREE_MAP
 _wt_tmpfile=$(mktemp)
-git worktree list –porcelain > “$_wt_tmpfile” 2>/dev/null || true
-_wt_path=””
+git worktree list > “$_wt_tmpfile” 2>/dev/null || true
 while IFS= read -r line; do
-if [[ “$line” == worktree\ * ]]; then
-_wt_path=”${line#worktree }”
-elif [[ “$line” == branch\ * ]]; then
-_wt_branch=”${line#branch refs/heads/}”
+
+# Extract path (first field) and branch (last field, in [brackets])
+
+_wt_path=$(echo “$line” | awk ‘{print $1}’)
+_wt_branch=$(echo “$line” | grep -oP ‘(?<=[)[^]]+(?=])’)
+if [[ -n “$_wt_branch” ]]; then
 WORKTREE_MAP[”$_wt_branch”]=”$_wt_path”
 fi
 done < “$_wt_tmpfile”
