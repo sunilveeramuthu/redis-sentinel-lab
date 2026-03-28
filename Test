@@ -1,25 +1,45 @@
 #!/usr/bin/env bash
 
-# git-branch-prune.sh — Interactive local branch pruning
+# git-branch-prune.sh
 
-# Compatible with bash 3.2+ (Git Bash on Windows ships bash 3.2)
+# 
 
-# Skips: master, current branch
+# IMPORTANT — Windows Git Bash users:
 
-# Prompts one-by-one for your branches; auto-marks others’ branches as candidates
+# Do NOT run this directly with ./git-branch-prune.sh if you downloaded it
+
+# on Windows (browser adds CRLF line endings which break bash).
+
+# Instead run via the companion: git-branch-prune.bat
+
+# Or manually: sed ‘s/\r//’ git-branch-prune.sh | bash
+
+# 
+
+# What it does:
+
+# - Lists all local branches except master and your current branch
+
+# - YOUR branches: prompts keep/delete/skip one at a time
+
+# - OTHERS’ branches: auto-queued for deletion (you confirm at the end)
+
+# - Shows worktree path if a branch is checked out in one
+
+# - Offers to remove both branch and worktree together
 
 set -euo pipefail
 
-# ── Current branch ──────────────────────────────────────────────────────────
+# ── Current branch ───────────────────────────────────────────────────────────
 
-# git branch –show-current requires Git 2.22+; fall back to rev-parse if needed
+# git branch –show-current requires Git 2.22+; rev-parse works on anything
 
 CURRENT_BRANCH=$(git branch –show-current 2>/dev/null || true)
 if [[ -z “$CURRENT_BRANCH” ]]; then
 CURRENT_BRANCH=$(git rev-parse –symbolic-full-name HEAD 2>/dev/null | sed ‘s|refs/heads/||’)
 fi
 if [[ -z “$CURRENT_BRANCH” ]]; then
-echo “ERROR: Could not determine current branch. Are you in a git repo?”
+echo “ERROR: Could not determine current branch. Are you inside a git repo?”
 exit 1
 fi
 
@@ -30,18 +50,23 @@ MY_NAME=$(git config user.name  2>/dev/null || true)
 
 # ── Temp files ───────────────────────────────────────────────────────────────
 
-# mktemp is unreliable on Git Bash; use TMPDIR/TEMP/TMP env vars with PID suffix
+# mktemp is unreliable on MINGW; build paths manually from Windows env vars.
+
+# TEMP/TMP are set by Windows and Git Bash translates them to POSIX paths.
 
 _tmpdir=”${TMPDIR:-${TEMP:-${TMP:-/tmp}}}”
-
-# Strip trailing slash if present
-
-_tmpdir=”${_tmpdir%/}”
+_tmpdir=”${_tmpdir%/}”   # strip trailing slash
 _wt_tmpfile=”${_tmpdir}/git-prune-$$-wt.tmp”
 _br_tmpfile=”${_tmpdir}/git-prune-$$-br.tmp”
-trap ‘rm -f “$_wt_tmpfile” “$_br_tmpfile”’ EXIT
 
-# ── Worktree map (bash 3.2: no associative arrays; use parallel indexed arrays)
+cleanup() { rm -f “$_wt_tmpfile” “$_br_tmpfile”; }
+trap cleanup EXIT
+
+# ── Worktree map ─────────────────────────────────────────────────────────────
+
+# bash 3.2 (shipped with Git Bash on Windows) has no associative arrays.
+
+# Use two parallel indexed arrays instead.
 
 # git worktree list default format: /path  <sha>  [branch]  or  (detached HEAD)
 
@@ -52,7 +77,7 @@ git worktree list > “$_wt_tmpfile” 2>/dev/null || true
 while IFS= read -r line; do
 _wt_path=$(echo “$line” | awk ‘{print $1}’)
 
-# Extract branch name from [brackets]; sed works on bash 3.2 unlike grep -oP
+# sed extracts text inside [brackets]; works on bash 3.2 unlike grep -oP
 
 _wt_branch=$(echo “$line” | sed -n ‘s/.*[([^]]*)].*/\1/p’)
 if [[ -n “$_wt_branch” ]]; then
@@ -75,9 +100,8 @@ echo “”
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 is_protected() {
-local branch=”$1”
-[[ “$branch” == “master”          ]] && return 0
-[[ “$branch” == “$CURRENT_BRANCH” ]] && return 0
+[[ “$1” == “master”          ]] && return 0
+[[ “$1” == “$CURRENT_BRANCH” ]] && return 0
 return 1
 }
 
@@ -104,14 +128,19 @@ echo “”
 TO_DELETE=()
 TO_DELETE_WORKTREES=()
 
-git branch –format=’%(refname:short)’ > “$_br_tmpfile”
+# git branch –format requires Git 2.7+; fall back to sed-based parsing
+
+if git branch –format=’%(refname:short)’ > “$_br_tmpfile” 2>/dev/null; then
+true  # worked
+else
+git branch | sed ‘s/^[* ]*//’ > “$_br_tmpfile”
+fi
 
 while IFS= read -r branch; do
 
-# Trim leading whitespace and stray * markers
+# Trim leading whitespace and any stray * or \r characters
 
-branch=”${branch#”${branch%%[![:space:]]*}”}”
-branch=”${branch/* /}”
+branch=$(echo “$branch” | tr -d ‘\r’ | sed ‘s/^[* ]*//’)
 
 [[ -z “$branch” ]] && continue
 is_protected “$branch” && continue
@@ -162,7 +191,7 @@ fi
 echo “”
 done < “$_br_tmpfile”
 
-# ── Summary & confirmation ───────────────────────────────────────────────────
+# ── Summary and confirmation ──────────────────────────────────────────────────
 
 echo “===============================”
 if [[ ${#TO_DELETE[@]} -eq 0 && ${#TO_DELETE_WORKTREES[@]} -eq 0 ]]; then
@@ -172,16 +201,12 @@ fi
 
 if [[ ${#TO_DELETE[@]} -gt 0 ]]; then
 echo “Branches marked for deletion (${#TO_DELETE[@]}):”
-for b in “${TO_DELETE[@]}”; do
-echo “  - $b”
-done
+for b in “${TO_DELETE[@]}”; do echo “  - $b”; done
 fi
 
 if [[ ${#TO_DELETE_WORKTREES[@]} -gt 0 ]]; then
 echo “Worktrees marked for removal (${#TO_DELETE_WORKTREES[@]}):”
-for w in “${TO_DELETE_WORKTREES[@]}”; do
-echo “  - $w”
-done
+for w in “${TO_DELETE_WORKTREES[@]}”; do echo “  - $w”; done
 fi
 
 echo “”
@@ -190,7 +215,7 @@ read -r confirm </dev/tty
 
 if [[ “$confirm” =~ ^[Yy]$ ]]; then
 
-# Remove worktrees first — git won’t delete a branch checked out in a worktree
+# Worktrees first: git won’t delete a branch still linked to a worktree
 
 for w in “${TO_DELETE_WORKTREES[@]}”; do
 git worktree remove –force “$w” && echo “Removed worktree: $w” || echo “Failed worktree:  $w”
