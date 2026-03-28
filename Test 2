@@ -1,0 +1,6 @@
+@echo off
+REM git-branch-prune.bat
+REM Run this instead of calling git-branch-prune.sh directly on Windows.
+REM It strips Windows CRLF line endings from the .sh file before passing to bash,
+REM which prevents "invalid signal specification" and related errors.
+bash -c "sed 's/\r//' '%~dp0git-branch-prune.sh' | bash -s"
